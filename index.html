@@ -705,6 +705,9 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
   async function handleImageUrl(u) {
     if (!S.canWrite) return;
     u = u.trim();
+    // Keep a real copy in Drive when the site allows it; otherwise show it from the site.
+    toast("Adding photo…");
+    try { const r = await api("savePhotoUrl", { url: u }); if (r && r.id) u = driveUrl(r.id); } catch (e) { /* fall back to the link */ }
     if (S.openId && !S.editing) {
       const r = getRecipe(S.openId); if (!r) return;
       const had = photosOf(r).length;
@@ -1046,15 +1049,22 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
   document.addEventListener("paste", (ev) => {
     const items = [...((ev.clipboardData && ev.clipboardData.items) || [])];
     const img = items.find((i) => i.kind === "file" && /^image\//.test(i.type));
-    const txt = (ev.clipboardData && ev.clipboardData.getData("text/plain")) || "";
+    const cd = ev.clipboardData;
+    const txt = (cd && cd.getData("text/plain")) || "";
+    // Safari often hands web pages only the photo's address (as a link or as HTML), not the picture.
+    const uri = ((cd && cd.getData("text/uri-list")) || "").split(/\r?\n/).find((l) => /^https:\/\//i.test(l)) || "";
+    const htmlSrc = (((cd && cd.getData("text/html")) || "").match(/<img[^>]+src=["'](https:[^"']+)["']/i) || [])[1] || "";
+    const photoAddr = htmlSrc ? htmlSrc.replace(/&amp;/g, "&") : looksLikeImageUrl(uri) ? uri : looksLikeImageUrl(txt) ? txt.trim() : "";
     const tid = ev.target && ev.target.id;
     if (tid === "pasteTarget") {
       ev.preventDefault();
       if (img) handleImageFile(img.getAsFile());
-      else if (looksLikeImageUrl(txt)) handleImageUrl(txt);
-      else toast("There's no photo on the clipboard. Copy a photo first.");
+      else if (photoAddr) handleImageUrl(photoAddr);
+      else if (/^https:\/\/\S+$/i.test((uri || txt).trim())) handleImageUrl((uri || txt).trim());
+      else toast("There's no photo on the clipboard. Right-click the photo and choose Copy Image, or take a screenshot with ⌘⇧⌃4.");
       return;
     }
+    if (!img && htmlSrc && !txt.trim()) { ev.preventDefault(); handleImageUrl(photoAddr); return; }
     if (!img && looksLikeImageUrl(txt)) {
       // In a normal text field (title, notes…) a link is just text. Elsewhere, treat it as the photo.
       const editable = ev.target && (ev.target.isContentEditable || /^(INPUT|TEXTAREA)$/.test(ev.target.tagName));
