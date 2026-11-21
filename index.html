@@ -641,10 +641,16 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
     </form>`;
   }
 
+  // Turn the API's technical "site blocks our reader" error into plain words.
+  function friendly(msg) {
+    if (/not accessible to our user agent|url_not_accessible|robots/i.test(msg || "")) return "This site blocks apps from reading its recipes. Copy the recipe text and paste it in with the link, or take a screenshot of the recipe and use Screenshot or photo.";
+    return msg;
+  }
+
   function formPhotosHTML() {
     if (!S.formImages.length) return "";
-    return `<div class="grid-gap" style="gap:6px"><b style="font-size:.9rem">Photos from the page</b><span class="note">Tap × to drop any that aren't this dish. The first one is the cover.</span>
-      <div class="form-photos">${S.formImages.map((u, i) => `<div class="ph">${imgTag(u, "")}<button type="button" data-rmimg="${i}" aria-label="Remove photo ${i + 1}">×</button></div>`).join("")}</div></div>`;
+    return `<div class="grid-gap" style="gap:6px"><b style="font-size:.9rem">Photos from the page</b><span class="note">The first photo is the cover. Tap a photo to make it the cover, or × to remove it.</span>
+      <div class="form-photos">${S.formImages.map((u, i) => `<div class="ph"${i === 0 ? ' style="outline:3px solid var(--accent);outline-offset:-3px"' : ""}><span data-cover="${i}" style="display:block;width:100%;height:100%;cursor:pointer">${imgTag(u, "")}</span><button type="button" data-rmimg="${i}" aria-label="Remove photo ${i + 1}">×</button></div>`).join("")}</div></div>`;
   }
 
   function readForm() {
@@ -701,6 +707,8 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
           <button class="btn ${r.want ? "primary" : ""}" data-act="toggle-want" aria-pressed="${!!r.want}">${r.want ? "★ On our list" : "☆ Want to make"}</button>
           <button class="btn herb" data-act="made">We made this</button>
           ${(r.ingredients || []).length ? `<button class="btn" data-act="to-grocery">Add to groceries</button>` : ""}
+          <label class="btn" for="addPhotoIn" style="font-weight:700">${S.uploading ? "Uploading photo…" : "Add a photo"}</label>
+          <input id="addPhotoIn" type="file" accept="image/*" hidden ${S.uploading ? "disabled" : ""}>
         </div>` : ""}
         ${needsDetails(r) ? `<div class="block"><h3>Needs details</h3><p class="note" style="margin:0 0 10px">Saved without ingredients or steps. Paste the caption or recipe to fill it in.</p>
           ${S.canWrite ? `<textarea id="fillText" placeholder="Paste caption or recipe text…"></textarea>
@@ -808,7 +816,7 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
     } catch (e) {
       S.busy = false;
       if (e && e.code === "no_ai") { S.canAI = false; S.err = "Automatic organizing isn't set up yet. Fill in by hand instead."; }
-      else if (e && e.message && e.code !== "network") S.err = e.message;
+      else if (e && e.message && e.code !== "network") S.err = friendly(e.message);
       else if (e && e.code === "rate_limited") S.err = "Too many requests just now. Wait a minute and try again.";
       else S.err = "Couldn't read that recipe. Try again, or fill it in by hand.";
     }
@@ -816,9 +824,10 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
   }
 
   document.addEventListener("click", async (ev) => {
-    const t = ev.target.closest("[data-open],[data-act],[data-tag],[data-mode],[data-rate],[data-gdel],[data-check],[data-pick],[data-hero],[data-rmimg]");
+    const t = ev.target.closest("[data-open],[data-act],[data-tag],[data-mode],[data-rate],[data-gdel],[data-check],[data-pick],[data-hero],[data-rmimg],[data-cover]");
     if (!t) return;
     if (t.dataset.hero) { S.heroIdx = +t.dataset.hero; renderSheet(); return; }
+    if (t.dataset.cover) { const i = +t.dataset.cover; const [u] = S.formImages.splice(i, 1); S.formImages.unshift(u); $("#formPhotos").innerHTML = formPhotosHTML(); return; }
     if (t.dataset.rmimg) { S.formImages.splice(+t.dataset.rmimg, 1); $("#formPhotos").innerHTML = formPhotosHTML(); return; }
     if (t.dataset.pick) { $("#g-name").value = t.dataset.pick; return; }
     if (t.dataset.check) { const k = t.dataset.check; S.checks.has(k) ? S.checks.delete(k) : S.checks.add(k); renderSheet(); return; }
@@ -866,7 +875,7 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
           const x = await extract("", null, r.sourceUrl);
           S.busy = false;
           await write(() => Data.update(r.id, patchFromExtract(r, x, r.rawText || "", false)), "Filled in. Check it over.");
-        } catch (e) { S.busy = false; S.err = (e && e.message) || "Couldn't read that link."; renderSheet(); }
+        } catch (e) { S.busy = false; S.err = friendly((e && e.message) || "Couldn't read that link."); renderSheet(); }
         break;
       }
       case "fill-extract": {
@@ -920,6 +929,22 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
 
   document.addEventListener("change", async (ev) => {
     const el = ev.target;
+    if (el.id === "addPhotoIn" && el.files && el.files[0]) {
+      const r = getRecipe(S.openId); if (!r) return;
+      S.uploading = true; renderSheet();
+      try {
+        const blob = await shrink(el.files[0]);
+        const id = await uploadPhoto(blob);
+        if (id) {
+          const url = "https://drive.google.com/thumbnail?id=" + encodeURIComponent(id) + "&sz=w1200";
+          const had = photosOf(r).length;
+          const images = had ? [...(r.images || []), url] : [url, ...(r.images || [])];
+          S.uploading = false;
+          await write(() => Data.update(r.id, { images }), had ? "Photo added. Tap Edit to make it the cover." : "Photo added as the cover.");
+        } else { S.uploading = false; renderSheet(); }
+      } catch (e) { S.uploading = false; toast((e && e.message) || "Couldn't add that photo."); renderSheet(); }
+      return;
+    }
     if (el.id === "photoIn" && el.files && el.files[0]) {
       try {
         S.err = "";
