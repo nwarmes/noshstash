@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Recipe Finder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<style>
+/* Layout: mobile-first single column, sticky top bar with search, bottom tab bar; recipe detail as a sheet. */
+:root {
+  --bg: #f3f5f1;
+  --surface: #ffffff;
+  --ink: #1b221d;
+  --muted: #5f6b63;
+  --line: #dfe4dc;
+  --accent: #e3a20b;      /* saffron */
+  --accent-ink: #231a00;
+  --herb: #2f6446;        /* basil */
+  --herb-soft: #e3eee6;
+  --danger: #b3261e;
+  --display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --body: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --radius: 14px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121613; --surface: #1b211d; --ink: #e8ede8; --muted: #9aa69e; --line: #2c352f;
+    --accent: #f0b432; --accent-ink: #1d1500; --herb: #7cc39a; --herb-soft: #21332a; --danger: #ff8a80;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121613; --surface: #1b211d; --ink: #e8ede8; --muted: #9aa69e; --line: #2c352f;
+  --accent: #f0b432; --accent-ink: #1d1500; --herb: #7cc39a; --herb-soft: #21332a; --danger: #ff8a80;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.5 var(--body); -webkit-text-size-adjust: 100%; }
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+h1, h2, h3 { font-family: var(--display); line-height: 1.15; margin: 0; text-wrap: balance; }
+img { max-width: 100%; display: block; }
+
+.app { max-width: 720px; margin: 0 auto; min-height: 100%; padding: 0 16px calc(96px + env(safe-area-inset-bottom)); }
+header.top { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: calc(12px + env(safe-area-inset-top)) 0 10px; display: grid; gap: 10px; }
+.brand { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.brand h1 { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.01em; }
+.brand h1 span { color: var(--herb); }
+.status { font-size: .8rem; color: var(--muted); }
+.search { display: flex; gap: 8px; }
+.search input { flex: 1; min-width: 0; padding: 11px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); }
+.chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.chip { flex: none; border: 1px solid var(--line); background: var(--surface); padding: 4px 11px; border-radius: 999px; font-size: .85rem; color: var(--muted); }
+.chip[aria-pressed="true"] { background: var(--herb); border-color: var(--herb); color: var(--surface); }
+
+nav.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--surface); border-top: 1px solid var(--line); padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
+nav.tabs .inner { max-width: 720px; margin: 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+nav.tabs a { text-decoration: none; color: var(--muted); display: grid; justify-items: center; gap: 2px; padding: 6px 0; border-radius: 10px; font-size: .78rem; font-weight: 700; }
+nav.tabs a svg { width: 22px; height: 22px; }
+nav.tabs a[aria-current="page"] { color: var(--herb); background: var(--herb-soft); }
+nav.tabs a.add { color: var(--accent-ink); background: var(--accent); }
+
+.section-head { display: flex; justify-content: space-between; align-items: baseline; margin: 14px 0 10px; gap: 12px; }
+.section-head h2 { font-size: 1.25rem; }
+.section-head .count { color: var(--muted); font-size: .85rem; font-variant-numeric: tabular-nums; }
+
+.feed { display: grid; gap: 12px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; display: grid; grid-template-columns: 1fr; text-align: left; padding: 0; width: 100%; }
+.card.has-img { grid-template-columns: 112px 1fr; }
+.card .thumb { background: var(--herb-soft); min-height: 112px; background-size: cover; background-position: center; }
+.card .body { padding: 12px 14px; display: grid; gap: 6px; min-width: 0; }
+.card h3 { font-size: 1.08rem; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; color: var(--muted); font-size: .82rem; }
+.pill { display: inline-block; font-size: .72rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--herb-soft); color: var(--herb); text-transform: uppercase; letter-spacing: .04em; }
+.pill.want { background: var(--accent); color: var(--accent-ink); }
+.pill.inbox { background: transparent; border: 1px dashed var(--muted); color: var(--muted); }
+.pill.example { background: transparent; border: 1px solid var(--line); color: var(--muted); }
+.stars { color: var(--accent); letter-spacing: 1px; font-size: .9rem; }
+.avatar { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--herb); color: var(--surface); font-size: .7rem; font-weight: 700; flex: none; }
+.who { display: inline-flex; align-items: center; gap: 6px; }
+
+.empty { text-align: center; color: var(--muted); padding: 40px 16px; border: 1px dashed var(--line); border-radius: var(--radius); }
+.empty strong { display: block; color: var(--ink); font-family: var(--display); font-size: 1.15rem; margin-bottom: 4px; }
+
+.btn { border: 1px solid var(--line); background: var(--surface); padding: 10px 16px; border-radius: 999px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; justify-content: center; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.herb { background: var(--herb); border-color: var(--herb); color: var(--surface); }
+.btn.ghost { background: transparent; }
+.btn.danger { color: var(--danger); }
+.btn:disabled { opacity: .55; cursor: default; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* Add */
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 4px; margin-bottom: 14px; }
+.seg button { border: 0; background: transparent; padding: 8px; border-radius: 999px; font-weight: 700; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--herb); color: var(--surface); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: grid; gap: 12px; }
+label { font-weight: 700; font-size: .9rem; display: grid; gap: 6px; }
+label .hint { font-weight: 400; color: var(--muted); font-size: .82rem; }
+input[type="text"], input[type="url"], textarea { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); }
+textarea { min-height: 110px; resize: vertical; }
+.drop { border: 2px dashed var(--line); border-radius: var(--radius); padding: 22px; text-align: center; color: var(--muted); display: grid; gap: 8px; justify-items: center; }
+.drop img { max-height: 260px; border-radius: 10px; }
+.note { font-size: .85rem; color: var(--muted); }
+.error { color: var(--danger); font-size: .9rem; }
+.working { display: inline-flex; gap: 8px; align-items: center; color: var(--muted); font-size: .9rem; }
+.spin { width: 16px; height: 16px; border: 2px solid var(--line); border-top-color: var(--herb); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Sheet */
+.sheet-wrap { position: fixed; inset: 0; z-index: 10; background: rgba(10, 14, 11, .45); display: flex; align-items: flex-end; justify-content: center; }
+.sheet { background: var(--bg); width: 100%; max-width: 720px; max-height: 94%; overflow-y: auto; border-radius: 20px 20px 0 0; padding: 0 0 calc(24px + env(safe-area-inset-bottom)); }
+.sheet .hero { height: 220px; background-size: cover; background-position: center; background-color: var(--herb-soft); }
+.sheet .inner { padding: 16px; display: grid; gap: 16px; }
+.sheet-top { position: sticky; top: 0; display: flex; justify-content: space-between; padding: 10px 12px; z-index: 2; pointer-events: none; }
+.sheet-top .btn { pointer-events: auto; padding: 8px 14px; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+.sheet h2 { font-size: 1.6rem; }
+.block { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
+.block h3 { font-size: 1rem; margin-bottom: 8px; }
+.ing { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ing li { padding-left: 18px; position: relative; }
+.ing li::before { content: ""; position: absolute; left: 2px; top: .62em; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.block h3 .count { color: var(--muted); font-family: var(--body); font-weight: 400; font-size: .85rem; margin-left: 4px; }
+h4.sub { font-family: var(--body); font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; color: var(--herb); margin: 14px 0 6px; }
+h4.sub:first-of-type { margin-top: 2px; }
+.ing li:has(.tick) { padding-left: 0; }
+.ing li:has(.tick)::before { display: none; }
+.tick { all: unset; box-sizing: border-box; cursor: pointer; display: flex; gap: 10px; align-items: flex-start; width: 100%; padding: 4px 0; line-height: 1.45; }
+.tick:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.ing .tick::before { content: ""; flex: none; width: 18px; height: 18px; margin-top: 2px; border-radius: 50%; border: 2px solid var(--accent); }
+.ing .tick.on::before { background: var(--herb); border-color: var(--herb); box-shadow: inset 0 0 0 3px var(--surface); }
+.tick.on { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line); }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.steps .tick { padding: 8px 0; font-size: 1.04rem; }
+.steps li + li .tick { border-top: 1px solid var(--line); }
+.steps .num { flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--herb-soft); color: var(--herb); display: grid; place-items: center; font-weight: 700; font-size: .9rem; font-variant-numeric: tabular-nums; }
+.steps .tick.on .num { background: var(--herb); color: var(--surface); }
+.steps b { color: var(--ink); background: var(--herb-soft); padding: 0 4px; border-radius: 4px; font-weight: 700; }
+.steps .tick.on b { background: transparent; color: inherit; }
+details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
+.rate-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; }
+.rate-row + .rate-row { border-top: 1px solid var(--line); }
+.star-btns { display: flex; }
+.star-btns button { border: 0; background: none; font-size: 1.5rem; line-height: 1; padding: 2px 3px; color: var(--line); }
+.star-btns button.on { color: var(--accent); }
+.comment { display: grid; grid-template-columns: 22px 1fr; gap: 8px; padding: 8px 0; }
+.comment + .comment { border-top: 1px solid var(--line); }
+.comment .when { color: var(--muted); font-size: .78rem; }
+.source-link { color: var(--herb); font-weight: 700; word-break: break-all; }
+
+/* Grocery */
+.g-group { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; }
+.g-group h3 { font-size: .95rem; color: var(--muted); font-family: var(--body); margin: 2px 0 4px; }
+.g-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+.g-item + .g-item { border-top: 1px solid var(--line); }
+.g-item input { width: 22px; height: 22px; accent-color: var(--herb); flex: none; }
+.g-item.done span { text-decoration: line-through; color: var(--muted); }
+.g-item span { flex: 1; }
+.g-item .x { border: 0; background: none; color: var(--muted); font-size: 1.2rem; padding: 0 4px; }
+.grid-gap { display: grid; gap: 12px; }
+.toast { position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 999px; font-size: .9rem; z-index: 20; max-width: 90%; }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand"><h1>Recipe <span>Finder</span></h1><button class="status" id="status" data-act="who" style="border:0;background:none;padding:0">Locked</button></div>
+    <div class="search" id="searchRow"><input id="q" type="search" placeholder="Search recipes, ingredients, tags" aria-label="Search recipes"></div>
+    <div class="chips" id="chips"></div>
+  </header>
+  <main id="main"></main>
+</div>
+<nav class="tabs" aria-label="Sections"><div class="inner">
+  <a href="#feed" data-v="feed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Recipes</a>
+  <a href="#want" data-v="want"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg>Want to make</a>
+  <a href="#grocery" data-v="grocery"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h2l2.4 11h11L21 8H7"/><circle cx="9" cy="19" r="1.5"/><circle cx="18" cy="19" r="1.5"/></svg>Groceries</a>
+  <a href="#add" data-v="add" class="add"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add recipe</a>
+</div></nav>
+<div id="sheet"></div>
+<div id="toast" class="toast" hidden></div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (s, r = document) => r.querySelector(s);
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const VIEWS = ["feed", "want", "grocery", "add"];
+
+  // Paste your Apps Script web app URL here (Deploy > Manage deployments > Web app URL).
+  const API_URL = "https://script.google.com/macros/s/AKfycbx5entc0_xagIDuLtSfzProiVpDXmGZUixzrDlYEWShukMXbNC9430dzyj5xdcYqRzY/exec";
+
+  const S = {
+    me: "", passcode: "", gateErr: "", mem: {},
+    canWrite: true, canAI: false, canImages: false,
+    recipes: [], grocery: [], allComments: [], loaded: false, stale: false, changeName: false,
+    view: "feed", q: "", tag: null,
+    openId: null, comments: [], editing: false,
+    addMode: "paste", draft: null, photo: null, photoUrl: null, busy: false, err: "",
+    paste: "", deleteArm: false, checks: new Set(),
+  };
+
+  // ---------- helpers ----------
+  const now = () => Date.now();
+  function toast(msg) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => (t.hidden = true), 2600); }
+  function ago(ms) {
+    if (!ms) return "";
+    const s = Math.round((now() - ms) / 1000);
+    if (s < 60) return "just now";
+    const m = Math.round(s / 60); if (m < 60) return m + "m ago";
+    const h = Math.round(m / 60); if (h < 24) return h + "h ago";
+    const d = Math.round(h / 24); if (d < 7) return d + "d ago";
+    return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+  function sourceOf(url) {
+    if (!url) return "";
+    try {
+      const h = new URL(url).hostname.replace(/^www\./, "");
+      if (/instagram\.com$/.test(h)) return "Instagram";
+      if (/tiktok\.com$/.test(h)) return "TikTok";
+      if (/youtube\.com$|youtu\.be$/.test(h)) return "YouTube";
+      if (/pinterest\./.test(h)) return "Pinterest";
+      if (/nytimes\.com$/.test(h)) return "NYT Cooking";
+      return h;
+    } catch { return ""; }
+  }
+  function titleFromUrl(url) {
+    try {
+      const u = new URL(url);
+      const seg = u.pathname.split("/").filter(Boolean).filter((p) => !/^\d+$/.test(p) && p.length > 3 && !/^(p|reel|reels|video|recipe|recipes)$/i.test(p)).pop();
+      if (seg) return seg.replace(/[-_]+/g, " ").replace(/\.\w+$/, "").replace(/\b\w/g, (c) => c.toUpperCase());
+      return "Saved from " + (sourceOf(url) || "a link");
+    } catch { return "Saved recipe"; }
+  }
+  function name(id) { return id ? String(id) : "Someone"; }
+  function firstName(id) { return name(id).split(" ")[0]; }
+  function initials(id) { const n = name(id); return n.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase(); }
+  function avg(r) { const v = Object.values(r.ratings || {}).filter((n) => n > 0); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; }
+  function starStr(n) { const f = Math.round(n); return "★".repeat(f) + "☆".repeat(5 - f); }
+  function imgUrl(r) { return r.imageId ? "https://drive.google.com/thumbnail?id=" + encodeURIComponent(r.imageId) + "&sz=w1200" : ""; }
+  function needsDetails(r) { return !(r.ingredients && r.ingredients.filter((l) => !/^##/.test(l)).length) && !(r.steps && r.steps.length); }
+  function getRecipe(id) { return S.recipes.find((r) => r.id === id); }
+  const isHead = (l) => /^##\s*/.test(l);
+  const headText = (l) => l.replace(/^##\s*/, "");
+  function cleanUrl(u) {
+    try {
+      const x = new URL(u);
+      ["igsh", "igshid", "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "fbclid", "si", "_t", "_r", "is_from_webapp", "sender_device"].forEach((k) => x.searchParams.delete(k));
+      x.hash = "";
+      return x.toString().replace(/\?$/, "");
+    } catch { return u; }
+  }
+  function splitPaste(txt) {
+    const m = (txt || "").match(/https?:\/\/[^\s<>"')]+/i);
+    const url = m ? cleanUrl(m[0].replace(/[.,!?]+$/, "")) : "";
+    const rest = (txt || "").replace(/https?:\/\/[^\s<>"')]+/gi, "").trim();
+    return { url, rest };
+  }
+  // Bold the times and temperatures so they're easy to spot mid-cook. Input is already escaped.
+  function cue(html) {
+    return html.replace(/(\d+(?:\s?(?:-|–|to)\s?\d+)?\s?(?:°\s?[FC]|degrees(?:\s?[FC])?|minutes?|mins?|hours?|hrs?|seconds?|secs?)\b)/gi, "<b>$1</b>");
+  }
+  function groups(lines) {
+    const out = [];
+    let cur = { name: "", items: [] };
+    (lines || []).forEach((l) => {
+      if (isHead(l)) { if (cur.items.length || cur.name) out.push(cur); cur = { name: headText(l), items: [] }; }
+      else cur.items.push(l);
+    });
+    if (cur.items.length || cur.name) out.push(cur);
+    return out;
+  }
+
+  // ---------- backend (Google Apps Script) ----------
+  const LS = {
+    get(k) { try { return localStorage.getItem("rf-" + k) || ""; } catch { return S.mem[k] || ""; } },
+    set(k, v) { try { localStorage.setItem("rf-" + k, v); } catch { S.mem[k] = v; } },
+    del(k) { try { localStorage.removeItem("rf-" + k); } catch { delete S.mem[k]; } },
+  };
+
+  async function api(action, data) {
+    if (!API_URL || /PASTE_/.test(API_URL)) throw { code: "setup", message: "The app isn't connected to its backend yet. Paste the Apps Script web app URL into index.html." };
+    let res;
+    try {
+      // text/plain keeps this a "simple" request so Apps Script needs no CORS preflight.
+      res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action, data, passcode: S.passcode }) });
+    } catch { throw { code: "network", message: "Couldn't reach the recipe box. Check your connection." }; }
+    let j;
+    try { j = await res.json(); } catch { throw { code: "network", message: "The backend sent back something unexpected. Check the web app URL and that it's deployed for Anyone." }; }
+    if (!j.ok) {
+      if (j.code === "passcode") { S.passcode = ""; LS.del("passcode"); S.gateErr = "That passcode didn't work. Try again."; render(); }
+      throw { code: j.code, message: j.message };
+    }
+    return j.data;
+  }
+
+  async function load(quiet) {
+    if (!S.passcode || !S.me) return;
+    if (load._busy) return; load._busy = true;
+    try {
+      const d = await api("list", {});
+      S.recipes = (d.recipes || []).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      S.allComments = d.comments || [];
+      S.grocery = (d.grocery || []).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+      S.canAI = !!d.ai; S.canImages = !!d.ai;
+      S.loaded = true; S.stale = false; S.err = S.err && S.err.startsWith("Couldn't load") ? "" : S.err;
+      LS.set("unlocked", "1");
+      syncComments();
+      render();
+    } catch (e) {
+      S.loaded = true;
+      if (e.code !== "passcode") { if (!quiet || !S.recipes.length) S.err = "Couldn't load recipes. " + (e.message || ""); else S.stale = true; render(); }
+    } finally { load._busy = false; }
+  }
+
+  function syncComments() {
+    S.comments = S.openId ? S.allComments.filter((c) => c.recipeId === S.openId).sort((a, b) => a.createdAt - b.createdAt) : [];
+  }
+
+  // Apply the server's copy of a recipe locally so the screen updates right away.
+  function putRecipe(r) {
+    if (!r || !r.id) return;
+    const i = S.recipes.findIndex((x) => x.id === r.id);
+    if (i >= 0) S.recipes[i] = r; else S.recipes.unshift(r);
+    render();
+  }
+  const Data = {
+    save: async (doc) => { const r = await api("saveRecipe", { recipe: doc }); putRecipe(r); return r; },
+    update: async (id, patch) => { const r = await api("updateRecipe", { id, patch }); putRecipe(r); return r; },
+    del: async (id) => { await api("deleteRecipe", { id }); S.recipes = S.recipes.filter((r) => r.id !== id); render(); },
+    comment: async (recipeId, text) => { const c = await api("addComment", { recipeId, text, by: S.me }); S.allComments.push(c); syncComments(); render(); },
+    groceryAdd: async (items) => { const gs = await api("groceryAdd", { items }); S.grocery.push(...gs); render(); return gs; },
+    groceryUpdate: async (id, done) => { const g = S.grocery.find((x) => x.id === id); if (g) g.done = done; render(); await api("groceryUpdate", { id, done }); },
+    groceryDelete: async (ids) => { const set = new Set(ids); S.grocery = S.grocery.filter((g) => !set.has(g.id)); render(); await api("groceryDelete", { ids }); },
+  };
+
+  function init() {
+    S.passcode = LS.get("passcode");
+    S.me = LS.get("name");
+    render();
+    if (S.passcode && S.me) load();
+    // Keep both phones in sync: refresh every 30 s while open, and when the app comes back to the front.
+    setInterval(() => { if (document.visibilityState === "visible" && !S.editing && !S.draft && !S.busy) load(true); }, 30000);
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") load(true); });
+  }
+
+  async function write(fn, okMsg) {
+    try { await fn(); if (okMsg) toast(okMsg); return true; }
+    catch (e) {
+      if (e && e.code === "passcode") toast("Enter the passcode again.");
+      else if (e && e.code === "not_found") { toast("That recipe was deleted on the other phone."); load(true); }
+      else toast((e && e.message) || "Couldn't save. Check your connection and try again.");
+      return false;
+    }
+  }
+
+  // ---------- organizing (runs on the backend) ----------
+  async function extract(material, images) {
+    let imageBase64 = "";
+    if (images && images.length) imageBase64 = await toBase64(images[0]);
+    const v = await api("organize", { text: material || "", imageBase64, mime: "image/jpeg" });
+    if (!v || typeof v !== "object") throw { message: "No recipe came back." };
+    const arr = (x) => (Array.isArray(x) ? x.map((s) => String(s).trim()).filter(Boolean) : []);
+    return {
+      isRecipe: v.isRecipe !== false,
+      title: String(v.title || "").trim(),
+      summary: String(v.summary || "").trim(), credit: String(v.credit || "").trim(),
+      ingredients: arr(v.ingredients), steps: arr(v.steps).map((s) => s.replace(/^(?:step\s*)?\d+[.):]\s*/i, "")),
+      tags: arr(v.tags).map((t) => t.toLowerCase().replace(/^#/, "")).slice(0, 6),
+      time: String(v.time || ""), servings: String(v.servings || ""), notes: String(v.notes || ""),
+    };
+  }
+
+  function toBase64(blob) {
+    return new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(String(fr.result).split(",")[1] || "");
+      fr.onerror = () => rej(new Error("Couldn't read that image."));
+      fr.readAsDataURL(blob);
+    });
+  }
+
+  function shrink(file, max = 1600) {
+    return new Promise((res, rej) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        const k = Math.min(1, max / Math.max(img.width, img.height));
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        c.toBlob((b) => (b ? res(b) : rej(new Error("Couldn't read that image."))), "image/jpeg", 0.85);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); rej(new Error("That file isn't an image this browser can read.")); };
+      img.src = url;
+    });
+  }
+
+  async function uploadPhoto(blob) {
+    if (!blob) return null;
+    try { const a = await api("uploadPhoto", { base64: await toBase64(blob), mime: "image/jpeg" }); return a.id; } catch { toast("The photo didn't upload, but the recipe saved."); return null; }
+  }
+
+  // ---------- render ----------
+  function renderTabs() {
+    document.querySelectorAll("nav.tabs a").forEach((a) => {
+      if (a.dataset.v === S.view) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+    });
+  }
+
+  function allTags() {
+    const c = {};
+    S.recipes.forEach((r) => (r.tags || []).forEach((t) => (c[t] = (c[t] || 0) + 1)));
+    return Object.entries(c).sort((a, b) => b[1] - a[1]).map(([t]) => t).slice(0, 24);
+  }
+
+  function filtered(list) {
+    const q = S.q.trim().toLowerCase();
+    return list.filter((r) => {
+      if (S.tag === "__inbox") { if (!needsDetails(r)) return false; }
+      else if (S.tag === "__top") { if (avg(r) < 4) return false; }
+      else if (S.tag && !(r.tags || []).includes(S.tag)) return false;
+      if (!q) return true;
+      const hay = [r.title, r.notes, r.sourceUrl, (r.tags || []).join(" "), (r.ingredients || []).join(" ")].join(" ").toLowerCase();
+      return q.split(/\s+/).every((w) => hay.includes(w));
+    });
+  }
+
+  function cardHTML(r) {
+    const img = imgUrl(r);
+    const a = avg(r);
+    const src = r.sourceUrl ? sourceOf(r.sourceUrl) : r.sourceType === "photo" ? "Photo" : r.sourceType === "text" ? "Pasted text" : "";
+    const pills = [];
+    if (r.example) pills.push('<span class="pill example">Example</span>');
+    if (r.want) pills.push('<span class="pill want">Want to make</span>');
+    if (needsDetails(r)) pills.push('<span class="pill inbox">Needs details</span>');
+    if (r.madeCount) pills.push(`<span class="pill">Made ${r.madeCount}×</span>`);
+    return `<button class="card${img ? " has-img" : ""}" data-open="${esc(r.id)}">
+      ${img ? `<div class="thumb" style="background-image:url('${esc(img)}')"></div>` : ""}
+      <div class="body">
+        ${pills.length ? `<div class="row">${pills.join("")}</div>` : ""}
+        <h3>${esc(r.title || "Untitled recipe")}</h3>
+        ${r.summary ? `<div class="note" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(r.summary)}</div>` : ""}
+        <div class="meta">
+          <span class="who"><span class="avatar" aria-hidden="true">${esc(initials(r.addedBy))}</span>${esc(firstName(r.addedBy))}</span>
+          ${src ? `<span>${esc(src)}</span>` : ""}
+          ${r.time ? `<span>${esc(r.time)}</span>` : ""}
+          ${a ? `<span class="stars" aria-label="Rated ${a.toFixed(1)} of 5">${starStr(a)}</span>` : ""}
+          <span>${esc(ago(r.createdAt))}</span>
+        </div>
+        ${(r.tags || []).length ? `<div class="meta">${r.tags.slice(0, 4).map((t) => "#" + esc(t)).join(" ")}</div>` : ""}
+      </div>
+    </button>`;
+  }
+
+  function statusLine() {
+    if (!S.passcode || !S.me) return "Locked";
+    if (!S.loaded) return "Loading…";
+    if (S.stale) return "Offline, showing saved copy";
+    return S.recipes.length + (S.recipes.length === 1 ? " recipe · " : " recipes · ") + S.me;
+  }
+
+  function gateView() {
+    const known = [...new Set(S.recipes.map((r) => r.addedBy).filter(Boolean))];
+    return `<form class="panel" id="gate" style="margin-top:24px;max-width:420px">
+      <h2>${S.passcode ? "Who's cooking?" : "Our recipe box"}</h2>
+      <p class="note" style="margin:0">${S.passcode ? "Pick the name that goes on the recipes, ratings and notes you add from this phone." : "Enter the household passcode once on this phone. It stays unlocked after that."}</p>
+      ${S.passcode ? "" : `<label for="g-pass">Passcode<input id="g-pass" type="password" autocomplete="current-password" required></label>`}
+      <label for="g-name">Your name<input id="g-name" type="text" autocomplete="given-name" value="${esc(S.me)}" placeholder="Nathan" required></label>
+      ${known.length ? `<div class="row">${known.map((k) => `<button type="button" class="chip" data-pick="${esc(k)}">${esc(k)}</button>`).join("")}</div>` : ""}
+      ${S.gateErr ? `<div class="error">${esc(S.gateErr)}</div>` : ""}
+      <div class="row"><button class="btn primary" type="submit">${S.passcode ? "Save" : "Unlock"}</button>
+      ${S.passcode && S.me ? `<button class="btn ghost" type="button" data-act="gate-cancel">Cancel</button>` : ""}</div>
+      ${S.passcode ? `<button type="button" class="btn ghost danger" data-act="lock" style="justify-self:start">Lock this phone</button>` : ""}
+    </form>`;
+  }
+
+  function render() {
+    renderTabs();
+    $("#status").textContent = statusLine();
+    const gate = !S.passcode || !S.me || S.changeName;
+    document.querySelector("nav.tabs").hidden = gate;
+    if (gate) { $("#searchRow").hidden = true; $("#chips").hidden = true; $("#main").innerHTML = gateView(); $("#sheet").innerHTML = ""; return; }
+    const showSearch = S.view === "feed" || S.view === "want";
+    $("#searchRow").hidden = !showSearch;
+    const chips = $("#chips");
+    chips.hidden = !showSearch;
+    if (showSearch) {
+      const special = [["__inbox", "Needs details"], ["__top", "★ 4+"]];
+      chips.innerHTML = [`<button class="chip" data-tag="" aria-pressed="${!S.tag}">All</button>`]
+        .concat(special.map(([k, l]) => `<button class="chip" data-tag="${k}" aria-pressed="${S.tag === k}">${l}</button>`))
+        .concat(allTags().map((t) => `<button class="chip" data-tag="${esc(t)}" aria-pressed="${S.tag === t}">#${esc(t)}</button>`)).join("");
+    }
+    const m = $("#main");
+    if (S.view === "feed") m.innerHTML = feedView();
+    else if (S.view === "want") m.innerHTML = wantView();
+    else if (S.view === "grocery") m.innerHTML = groceryView();
+    else m.innerHTML = addView();
+    renderSheet();
+  }
+
+  function loadingOrEmpty(list, emptyTitle, emptyText) {
+    if (!S.loaded) return `<div class="empty"><span class="working"><span class="spin"></span>Loading recipes…</span></div>`;
+    if (S.err) return `<div class="empty"><strong>Something went wrong</strong>${esc(S.err)}</div>`;
+    if (!list.length) return `<div class="empty"><strong>${emptyTitle}</strong>${emptyText}</div>`;
+    return "";
+  }
+
+  function feedView() {
+    const list = filtered(S.recipes.slice().sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)));
+    const e = loadingOrEmpty(list, S.q || S.tag ? "No matches" : "No recipes yet", S.q || S.tag ? "Try another search or tag." : 'Tap <b>Add recipe</b> to save a link, paste a text, or snap a screenshot.');
+    return `<div class="section-head"><h2>${S.tag || S.q ? "Results" : "Latest from our kitchen"}</h2><span class="count">${list.length}</span></div>
+      ${e || `<div class="feed">${list.map(cardHTML).join("")}</div>`}`;
+  }
+
+  function wantView() {
+    const list = filtered(S.recipes.filter((r) => r.want).sort((a, b) => (b.wantAt || 0) - (a.wantAt || 0)));
+    const e = loadingOrEmpty(list, "Nothing queued", "Open any recipe and tap <b>Want to make</b> to add it here.");
+    return `<div class="section-head"><h2>Want to make</h2><span class="count">${list.length}</span></div>
+      ${list.length ? `<div class="row" style="margin-bottom:12px"><button class="btn" data-act="want-to-grocery">Add all ingredients to groceries</button></div>` : ""}
+      ${e || `<div class="feed">${list.map(cardHTML).join("")}</div>`}`;
+  }
+
+  function groceryView() {
+    const items = S.grocery;
+    const groups = {};
+    items.forEach((g) => { const k = g.recipeTitle || "Extras"; (groups[k] = groups[k] || []).push(g); });
+    const left = items.filter((g) => !g.done).length;
+    const done = items.length - left;
+    const body = items.length
+      ? Object.entries(groups).map(([k, gs]) => `<div class="g-group"><h3>${esc(k)}</h3>${gs.map((g) => `
+          <div class="g-item${g.done ? " done" : ""}">
+            <input type="checkbox" id="g-${esc(g.id)}" data-gtoggle="${esc(g.id)}" ${g.done ? "checked" : ""} ${S.canWrite ? "" : "disabled"}>
+            <span><label for="g-${esc(g.id)}" style="font-weight:400;display:inline">${esc(g.text)}</label></span>
+            ${S.canWrite ? `<button class="x" data-gdel="${esc(g.id)}" aria-label="Remove ${esc(g.text)}">×</button>` : ""}
+          </div>`).join("")}</div>`).join("")
+      : `<div class="empty"><strong>List is empty</strong>Add ingredients from a recipe, or type an item below.</div>`;
+    return `<div class="section-head"><h2>Groceries</h2><span class="count">${left} to get${done ? ` · ${done} in cart` : ""}</span></div>
+      ${S.canWrite ? `<form class="search" id="gAdd" style="margin-bottom:12px"><input id="gText" type="text" placeholder="Add an item (e.g. lemons)" aria-label="Add grocery item"><button class="btn herb" type="submit">Add</button></form>` : ""}
+      <div class="grid-gap">${body}</div>
+      ${items.length ? `<div class="row" style="margin-top:14px">
+        <button class="btn" data-act="g-copy">Copy list</button>
+        ${S.canWrite && done ? `<button class="btn" data-act="g-clear-done">Clear checked</button>` : ""}
+        ${S.canWrite ? `<button class="btn ghost danger" data-act="g-clear-all">${S.deleteArm === "grocery" ? "Tap again to clear all" : "Clear all"}</button>` : ""}
+      </div>` : ""}`;
+  }
+
+  function addView() {
+    if (!S.canWrite) return `<div class="empty"><strong>View only</strong>Ask the owner to give you Contributor access to add recipes.</div>`;
+    if (S.draft) return `<div class="section-head"><h2>Check and save</h2></div>${editForm(S.draft, "draft")}`;
+    const busy = S.busy ? `<span class="working"><span class="spin"></span>Reading the recipe…</span>` : "";
+    const err = S.err ? `<div class="error">${esc(S.err)}</div>` : "";
+    const ai = S.canAI;
+    let panel = "";
+    if (S.addMode === "paste") {
+      panel = `<label for="pasteBox">Paste it here<span class="hint">A link, the caption, a texted recipe, or all of it at once. The recipe gets pulled out and organized as soon as you paste.</span>
+          <textarea id="pasteBox" style="min-height:190px" placeholder="https://www.instagram.com/p/…&#10;&#10;🔥 The BEST 20 minute pasta 🔥 You need: 8 oz rigatoni, 2 tbsp butter…">${esc(S.paste)}</textarea></label>
+        <div id="pasteCtl" class="grid-gap" style="gap:10px">${pasteControls()}</div>`;
+    } else {
+      panel = `<div class="drop">
+          ${S.photoUrl ? `<img src="${esc(S.photoUrl)}" alt="Selected recipe photo">` : `<div>Choose a screenshot or a photo of a cookbook page.</div>`}
+          <label class="btn" for="photoIn" style="font-weight:700">${S.photoUrl ? "Choose a different photo" : "Choose photo"}</label>
+          <input id="photoIn" type="file" accept="image/*" hidden>
+        </div>
+        <div class="row">
+          ${ai && S.canImages ? `<button class="btn primary" data-act="photo-extract" ${S.photo && !S.busy ? "" : "disabled"}>Read recipe from photo</button>` : ""}
+          <button class="btn" data-act="photo-manual" ${S.photo && !S.busy ? "" : "disabled"}>Save photo, fill in by hand</button>
+        </div>
+        ${ai && !S.canImages ? `<div class="note">Reading recipes from photos isn't available here, so you can save the photo and type the details.</div>` : ""}`;
+    }
+    return `<div class="section-head"><h2>Add a recipe</h2></div>
+      <div class="seg" role="group" aria-label="How are you adding it?" style="grid-template-columns:1fr 1fr">
+        <button data-mode="paste" aria-pressed="${S.addMode === "paste"}">Paste link or text</button>
+        <button data-mode="photo" aria-pressed="${S.addMode === "photo"}">Screenshot or photo</button>
+      </div>
+      <div class="panel">${panel}${busy}${err}</div>
+      ${!ai && S.loaded ? `<p class="note">Automatic organizing turns on once an Anthropic API key is added to the backend. You can still save everything by hand.</p>` : ""}`;
+  }
+
+  function pasteControls() {
+    const { url, rest } = splitPaste(S.paste);
+    const linkOnly = url && rest.length < 15;
+    const ai = S.canAI;
+    return `${url ? `<div class="note">Link found: <b>${esc(sourceOf(url) || url)}</b>${linkOnly ? ". Instagram and TikTok don't let other sites read their posts, so paste the caption too to get the full recipe. A link by itself gets saved to sort later." : ""}</div>` : ""}
+      <div class="row">
+        ${ai && !linkOnly ? `<button class="btn primary" data-act="paste-extract" ${S.busy || !rest ? "disabled" : ""}>Organize recipe</button>` : ""}
+        ${url ? `<button class="btn ${linkOnly || !ai ? "primary" : ""}" data-act="paste-quick" ${S.busy ? "disabled" : ""}>Save link, add recipe later</button>` : ""}
+        ${!linkOnly ? `<button class="btn ghost" data-act="paste-manual" ${S.busy || !S.paste.trim() ? "disabled" : ""}>Fill in by hand</button>` : ""}
+      </div>`;
+  }
+
+  function editForm(d, ctx) {
+    return `<form class="panel" id="editForm" data-ctx="${ctx}">
+      ${d._warn ? `<div class="error">${esc(d._warn)}</div>` : ""}
+      <label for="f-title">Title<input id="f-title" type="text" value="${esc(d.title)}" required></label>
+      <label for="f-sum">One-line description<input id="f-sum" type="text" value="${esc(d.summary || "")}" placeholder="Optional"></label>
+      <div class="row" style="align-items:stretch">
+        <label for="f-url" style="flex:2;min-width:180px">Link<input id="f-url" type="url" value="${esc(d.sourceUrl || "")}" placeholder="Optional"></label>
+        <label for="f-credit" style="flex:1;min-width:120px">Credit<input id="f-credit" type="text" value="${esc(d.credit || "")}" placeholder="@creator"></label>
+      </div>
+      <div class="row" style="align-items:stretch">
+        <label for="f-time" style="flex:1">Time<input id="f-time" type="text" value="${esc(d.time || "")}" placeholder="35 min"></label>
+        <label for="f-serv" style="flex:1">Serves<input id="f-serv" type="text" value="${esc(d.servings || "")}" placeholder="4"></label>
+      </div>
+      <label for="f-tags">Tags<span class="hint">Comma separated, like weeknight, pasta, vegetarian</span><input id="f-tags" type="text" value="${esc((d.tags || []).join(", "))}"></label>
+      <label for="f-ing">Ingredients<span class="hint">One per line. Start a line with ## to make a section, like ## Sauce</span><textarea id="f-ing" style="min-height:160px">${esc((d.ingredients || []).join("\n"))}</textarea></label>
+      <label for="f-steps">Steps<span class="hint">One per line, numbers added for you. ## works here too.</span><textarea id="f-steps" style="min-height:160px">${esc((d.steps || []).join("\n"))}</textarea></label>
+      <label for="f-notes">Notes<textarea id="f-notes" style="min-height:70px">${esc(d.notes || "")}</textarea></label>
+      <label style="flex-direction:row;display:flex;gap:8px;align-items:center;font-weight:400"><input type="checkbox" id="f-want" ${d.want ? "checked" : ""} style="width:20px;height:20px;accent-color:var(--herb)"> Add to Want to make</label>
+      <div class="row">
+        <button class="btn primary" type="submit">Save recipe</button>
+        <button class="btn ghost" type="button" data-act="${ctx === "draft" ? "draft-cancel" : "edit-cancel"}">Cancel</button>
+      </div>
+    </form>`;
+  }
+
+  function readForm() {
+    const lines = (id) => $(id).value.split("\n").map((s) => s.replace(/^\s*(?:[-•*]|\d+[.)])\s*/, "").trim()).filter(Boolean);
+    return {
+      title: $("#f-title").value.trim() || "Untitled recipe",
+      sourceUrl: cleanUrl($("#f-url").value.trim()),
+      summary: $("#f-sum").value.trim(),
+      credit: $("#f-credit").value.trim(),
+      time: $("#f-time").value.trim(),
+      servings: $("#f-serv").value.trim(),
+      tags: [...new Set($("#f-tags").value.split(",").map((t) => t.trim().toLowerCase().replace(/^#/, "")).filter(Boolean))],
+      ingredients: lines("#f-ing"),
+      steps: lines("#f-steps"),
+      notes: $("#f-notes").value.trim(),
+      want: $("#f-want").checked,
+    };
+  }
+
+  // ---------- detail sheet ----------
+  function renderSheet() {
+    const host = $("#sheet");
+    const r = S.openId && getRecipe(S.openId);
+    if (!r) { host.innerHTML = ""; document.body.style.overflow = ""; return; }
+    document.body.style.overflow = "hidden";
+    const prevScroll = $(".sheet", host) ? $(".sheet", host).scrollTop : 0;
+    const img = imgUrl(r);
+    const people = [...new Set([S.me, ...Object.keys(r.ratings || {})].filter(Boolean))];
+    let body;
+    if (S.editing) {
+      body = `<div class="inner"><h2>Edit recipe</h2>${editForm(r, "edit")}</div>`;
+    } else {
+      const src = r.sourceUrl ? `<a class="source-link" href="${esc(r.sourceUrl)}" target="_blank" rel="noopener">Open on ${esc(sourceOf(r.sourceUrl) || "source")} ↗</a>` : "";
+      body = `${img ? `<div class="hero" style="background-image:url('${esc(img)}')"></div>` : ""}
+      <div class="inner">
+        <div class="grid-gap" style="gap:8px">
+          <div class="row">${r.example ? '<span class="pill example">Example</span>' : ""}${(r.tags || []).map((t) => `<span class="pill">${esc(t)}</span>`).join("")}</div>
+          <h2>${esc(r.title)}</h2>
+          ${r.summary ? `<p style="margin:0;color:var(--muted)">${esc(r.summary)}</p>` : ""}
+          <div class="meta">
+            <span class="who"><span class="avatar" aria-hidden="true">${esc(initials(r.addedBy))}</span>Added by ${esc(firstName(r.addedBy))} · ${esc(ago(r.createdAt))}</span>
+            ${r.credit ? `<span>Recipe by ${esc(r.credit)}</span>` : ""}
+            ${r.time ? `<span>${esc(r.time)}</span>` : ""}${r.servings ? `<span>Serves ${esc(r.servings)}</span>` : ""}
+            ${r.madeCount ? `<span>Made ${r.madeCount}× · last ${esc(ago(r.lastMade))}</span>` : ""}
+          </div>
+          ${src}
+        </div>
+        ${S.canWrite ? `<div class="row">
+          <button class="btn ${r.want ? "primary" : ""}" data-act="toggle-want" aria-pressed="${!!r.want}">${r.want ? "★ On our list" : "☆ Want to make"}</button>
+          <button class="btn herb" data-act="made">We made this</button>
+          ${(r.ingredients || []).length ? `<button class="btn" data-act="to-grocery">Add to groceries</button>` : ""}
+        </div>` : ""}
+        ${needsDetails(r) ? `<div class="block"><h3>Needs details</h3><p class="note" style="margin:0 0 10px">Saved without ingredients or steps. Paste the caption or recipe to fill it in.</p>
+          ${S.canWrite ? `<textarea id="fillText" placeholder="Paste caption or recipe text…"></textarea>
+          <div class="row" style="margin-top:8px">${S.canAI ? `<button class="btn primary" data-act="fill-extract" ${S.busy ? "disabled" : ""}>Read and fill in</button>` : ""}<button class="btn" data-act="edit">Fill in by hand</button></div>
+          ${S.busy ? `<span class="working"><span class="spin"></span>Reading…</span>` : ""}${S.err ? `<div class="error">${esc(S.err)}</div>` : ""}` : ""}</div>` : ""}
+        ${!needsDetails(r) ? `<p class="note" style="margin:-4px 0 0">Tap ingredients as you gather them and steps as you finish them.</p>` : ""}
+        ${(r.ingredients || []).length ? `<div class="block"><h3>Ingredients <span class="count">${r.ingredients.filter((l) => !isHead(l)).length}</span></h3>
+          ${groups(r.ingredients).map((g, gi) => `${g.name ? `<h4 class="sub">${esc(g.name)}</h4>` : ""}<ul class="ing">${g.items.map((i, ii) => { const k = "i" + gi + "-" + ii; return `<li><button class="tick${S.checks.has(k) ? " on" : ""}" data-check="${k}" aria-pressed="${S.checks.has(k)}">${esc(i)}</button></li>`; }).join("")}</ul>`).join("")}</div>` : ""}
+        ${(r.steps || []).length ? `<div class="block"><h3>Steps</h3>
+          ${(() => { let n = 0; return groups(r.steps).map((g, gi) => `${g.name ? `<h4 class="sub">${esc(g.name)}</h4>` : ""}<ol class="steps">${g.items.map((s, si) => { n++; const k = "s" + gi + "-" + si; return `<li><button class="tick step${S.checks.has(k) ? " on" : ""}" data-check="${k}" aria-pressed="${S.checks.has(k)}"><span class="num">${n}</span><span>${cue(esc(s))}</span></button></li>`; }).join("")}</ol>`).join(""); })()}</div>` : ""}
+        ${r.notes ? `<div class="block"><h3>Tips</h3><ul class="ing">${r.notes.split("\n").map((l) => l.replace(/^\s*[-•*]\s*/, "").trim()).filter(Boolean).map((l) => `<li>${esc(l)}</li>`).join("")}</ul></div>` : ""}
+        ${r.rawText ? `<details class="block raw"><summary>Original post</summary><div style="white-space:pre-wrap;margin-top:8px">${esc(r.rawText)}</div>
+          ${S.canWrite && S.canAI ? `<div class="row" style="margin-top:10px"><button class="btn" data-act="reclean" ${S.busy ? "disabled" : ""}>Organize again from this</button>${S.busy ? `<span class="working"><span class="spin"></span>Organizing…</span>` : ""}</div>` : ""}</details>` : ""}
+        <div class="block"><h3>Ratings</h3>
+          ${people.length ? people.map((p) => {
+            const v = (r.ratings || {})[p] || 0;
+            const mine = p === S.me && S.canWrite;
+            return `<div class="rate-row"><span class="who"><span class="avatar" aria-hidden="true">${esc(initials(p))}</span>${esc(p === S.me ? "You" : firstName(p))}</span>
+              ${mine ? `<span class="star-btns" role="group" aria-label="Your rating">${[1, 2, 3, 4, 5].map((n) => `<button class="${n <= v ? "on" : ""}" data-rate="${n}" aria-label="${n} star${n > 1 ? "s" : ""}">★</button>`).join("")}</span>`
+                     : `<span class="stars">${v ? starStr(v) : '<span class="note">Not rated</span>'}</span>`}</div>`;
+          }).join("") : `<p class="note" style="margin:0">No ratings yet.</p>`}
+        </div>
+        <div class="block"><h3>Notes from the kitchen</h3>
+          ${S.comments.length ? S.comments.map((c) => `<div class="comment"><span class="avatar" aria-hidden="true">${esc(initials(c.by))}</span><div><b>${esc(c.by === S.me ? "You" : firstName(c.by))}</b> <span class="when">${esc(ago(c.createdAt))}</span><div style="white-space:pre-wrap">${esc(c.text)}</div></div></div>`).join("") : `<p class="note" style="margin:0 0 8px">How did it turn out? Leave a note for next time.</p>`}
+          ${S.canWrite ? `<form class="search" id="cAdd" style="margin-top:8px"><input id="cText" type="text" placeholder="Less salt next time…" aria-label="Add a note"><button class="btn herb" type="submit">Post</button></form>` : ""}
+        </div>
+        ${S.canWrite ? `<div class="row"><button class="btn" data-act="edit">Edit</button><button class="btn ghost danger" data-act="delete">${S.deleteArm === r.id ? "Tap again to delete" : "Delete recipe"}</button></div>` : ""}
+      </div>`;
+    }
+    host.innerHTML = `<div class="sheet-wrap" data-act="close-bg"><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(r.title)}">
+      <div class="sheet-top"><span></span><button class="btn" data-act="close">Close</button></div>${body}</div></div>`;
+    $(".sheet", host).scrollTop = prevScroll;
+  }
+
+  function openRecipe(id) {
+    closeRecipe(true);
+    S.openId = id; S.editing = false; S.comments = []; S.err = ""; S.deleteArm = false; S.checks = new Set();
+    syncComments();
+    renderSheet();
+  }
+  function closeRecipe(silent) {
+    S.openId = null; S.editing = false; S.comments = []; S.deleteArm = false;
+    if (!silent) { S.err = ""; renderSheet(); }
+  }
+
+  // ---------- actions ----------
+  async function saveNew(data, extra = {}) {
+    const t = now();
+    const doc = {
+      title: data.title, summary: data.summary || "", credit: data.credit || "", sourceUrl: data.sourceUrl || "", sourceType: extra.sourceType || (data.sourceUrl ? "link" : "text"),
+      ingredients: data.ingredients || [], steps: data.steps || [], tags: data.tags || [],
+      time: data.time || "", servings: data.servings || "", notes: data.notes || "",
+      imageId: extra.imageId || null, rawText: (extra.rawText || "").slice(0, 20000),
+      want: !!data.want, wantAt: data.want ? t : null, madeCount: 0, lastMade: null,
+      ratings: {}, addedBy: S.me || null, createdAt: t, updatedAt: t,
+    };
+    let saved = null;
+    const ok = await write(async () => { saved = await Data.save(doc); }, "Saved");
+    return ok && saved ? saved.id : null;
+  }
+
+  async function addToGrocery(recipes) {
+    const have = new Set(S.grocery.filter((g) => !g.done).map((g) => (g.recipeId || "") + "|" + g.text));
+    const items = [];
+    for (const r of recipes) {
+      for (const line of (r.ingredients || []).filter((l) => !isHead(l))) {
+        if (have.has(r.id + "|" + line)) continue;
+        have.add(r.id + "|" + line);
+        items.push({ text: line, recipeId: r.id, recipeTitle: r.title, by: S.me });
+      }
+    }
+    if (!items.length) { toast("Those are already on the list"); return; }
+    const k = items.length;
+    await write(() => Data.groceryAdd(items), `Added ${k} item${k > 1 ? "s" : ""} to groceries`);
+  }
+
+  function resetAdd() { S.draft = null; S.photo = null; if (S.photoUrl) URL.revokeObjectURL(S.photoUrl); S.photoUrl = null; S.paste = ""; S.err = ""; }
+
+  function pasteExtract() {
+    const { url, rest } = splitPaste(S.paste);
+    if (!rest) { S.err = "Paste the caption or recipe text too."; render(); return; }
+    runExtract((url ? "Source link: " + url + "\n\n" : "") + rest, null, { sourceUrl: url, title: "", _sourceType: url ? "link" : "text", _raw: rest });
+  }
+
+  function patchFromExtract(r, x, raw, replace) {
+    const patch = { updatedAt: now(), rawText: raw.slice(0, 20000) };
+    ["ingredients", "steps", "time", "servings", "summary", "credit"].forEach((k) => { if (x[k] && x[k].length) patch[k] = x[k]; });
+    if (x.tags.length) patch.tags = replace ? x.tags : [...new Set([...(r.tags || []), ...x.tags])];
+    if (x.notes) patch.notes = replace ? x.notes : [r.notes, x.notes].filter(Boolean).join("\n");
+    if (x.title && /^(saved|untitled)/i.test(r.title || "untitled")) patch.title = x.title;
+    return patch;
+  }
+
+  async function runExtract(material, images, base) {
+    S.busy = true; S.err = ""; render();
+    try {
+      const x = await extract(material, images);
+      S.busy = false;
+      if (!x.isRecipe && !x.ingredients.length) {
+        S.draft = { ...base, title: base.title || "", _warn: "Couldn't find a recipe in that. Fill in what you can, or save it as is." };
+      } else {
+        S.draft = { ...base, ...x, title: x.title || base.title || "", sourceUrl: base.sourceUrl || "" };
+      }
+    } catch (e) {
+      S.busy = false;
+      if (e && e.code === "no_ai") { S.canAI = false; S.err = "Automatic organizing isn't set up yet. Fill in by hand instead."; }
+      else if (e && e.message && e.code !== "network") S.err = e.message;
+      else if (e && e.code === "rate_limited") S.err = "Too many requests just now. Wait a minute and try again.";
+      else S.err = "Couldn't read that recipe. Try again, or fill it in by hand.";
+    }
+    render();
+  }
+
+  document.addEventListener("click", async (ev) => {
+    const t = ev.target.closest("[data-open],[data-act],[data-tag],[data-mode],[data-rate],[data-gdel],[data-check],[data-pick]");
+    if (!t) return;
+    if (t.dataset.pick) { $("#g-name").value = t.dataset.pick; return; }
+    if (t.dataset.check) { const k = t.dataset.check; S.checks.has(k) ? S.checks.delete(k) : S.checks.add(k); renderSheet(); return; }
+    if (t.dataset.open) { openRecipe(t.dataset.open); return; }
+    if ("tag" in t.dataset) { S.tag = t.dataset.tag || null; if (S.tag === t.dataset.tag && t.getAttribute("aria-pressed") === "true") S.tag = null; render(); return; }
+    if (t.dataset.mode) { S.addMode = t.dataset.mode; S.err = ""; render(); return; }
+    const r = S.openId && getRecipe(S.openId);
+    if (t.dataset.rate && r) {
+      const n = +t.dataset.rate; const cur = (r.ratings || {})[S.me] || 0;
+      await write(() => Data.update(r.id, { ratings: { [S.me]: cur === n ? 0 : n } }));
+      return;
+    }
+    if (t.dataset.gdel) { const id = t.dataset.gdel; await write(() => Data.groceryDelete([id])); return; }
+
+    const act = t.dataset.act;
+    if (act === "close-bg" && ev.target !== t) return;
+    switch (act) {
+      case "close": case "close-bg": closeRecipe(); break;
+      case "who": if (S.passcode && S.me) { S.changeName = true; render(); } break;
+      case "gate-cancel": S.changeName = false; render(); break;
+      case "lock": LS.del("passcode"); S.passcode = ""; S.changeName = false; S.recipes = []; S.grocery = []; S.allComments = []; S.loaded = false; render(); break;
+      case "toggle-want": await write(() => Data.update(r.id, { want: !r.want, wantAt: !r.want ? now() : null }), r.want ? "Removed from list" : "Added to Want to make"); break;
+      case "made": await write(() => Data.update(r.id, { madeCount: (r.madeCount || 0) + 1, lastMade: now(), want: false }), "Nice. Leave a rating and a note below."); break;
+      case "to-grocery": await addToGrocery([r]); break;
+      case "want-to-grocery": await addToGrocery(S.recipes.filter((x) => x.want)); break;
+      case "edit": S.editing = true; renderSheet(); break;
+      case "edit-cancel": S.editing = false; renderSheet(); break;
+      case "delete":
+        if (S.deleteArm !== r.id) { S.deleteArm = r.id; renderSheet(); setTimeout(() => { if (S.deleteArm === r.id) { S.deleteArm = false; renderSheet(); } }, 4000); break; }
+        { const id = r.id; closeRecipe(); await write(() => Data.del(id), "Recipe deleted"); }
+        break;
+      case "fill-extract": {
+        const txt = $("#fillText").value.trim();
+        if (!txt) { S.err = "Paste the caption or recipe first."; renderSheet(); break; }
+        S.busy = true; S.err = ""; renderSheet();
+        try {
+          const sp = splitPaste(txt);
+          const x = await extract((r.sourceUrl ? "Source link: " + r.sourceUrl + "\n\n" : "") + sp.rest);
+          S.busy = false;
+          const patch = patchFromExtract(r, x, sp.rest, false);
+          if (sp.url && !r.sourceUrl) patch.sourceUrl = sp.url;
+          await write(() => Data.update(r.id, patch), "Filled in. Check it over.");
+        } catch (e) { S.busy = false; S.err = "Couldn't read that. Try again or fill in by hand."; renderSheet(); }
+        break;
+      }
+      case "paste-quick": {
+        const { url, rest } = splitPaste(S.paste);
+        if (!url) break;
+        const id = await saveNew({ title: titleFromUrl(url), sourceUrl: url }, { sourceType: "link", rawText: rest });
+        if (id) { resetAdd(); location.hash = "#feed"; }
+        break;
+      }
+      case "paste-extract": pasteExtract(); break;
+      case "paste-manual": { const { url, rest } = splitPaste(S.paste); S.draft = { title: "", sourceUrl: url, notes: rest, _sourceType: url ? "link" : "text", _raw: rest }; render(); break; }
+      case "reclean": {
+        S.busy = true; renderSheet();
+        try {
+          const x = await extract((r.sourceUrl ? "Source link: " + r.sourceUrl + "\n\n" : "") + r.rawText);
+          S.busy = false; S.checks.clear();
+          await write(() => Data.update(r.id, patchFromExtract(r, x, r.rawText, true)), "Reorganized");
+        } catch { S.busy = false; toast("Couldn't organize that. Try again in a minute."); renderSheet(); }
+        break;
+      }
+      case "photo-extract": if (S.photo) await runExtract("", [S.photo], { _sourceType: "photo" }); break;
+      case "photo-manual": S.draft = { title: "", _sourceType: "photo" }; render(); break;
+      case "draft-cancel": S.draft = null; render(); break;
+      case "g-copy": {
+        const txt = S.grocery.filter((g) => !g.done).map((g) => "• " + g.text).join("\n");
+        try { await navigator.clipboard.writeText(txt); toast("List copied"); } catch { toast("Couldn't copy. Long-press to select the list instead."); }
+        break;
+      }
+      case "g-clear-done": await write(() => Data.groceryDelete(S.grocery.filter((x) => x.done).map((g) => g.id))); break;
+      case "g-clear-all":
+        if (S.deleteArm !== "grocery") { S.deleteArm = "grocery"; render(); setTimeout(() => { if (S.deleteArm === "grocery") { S.deleteArm = false; render(); } }, 4000); break; }
+        S.deleteArm = false;
+        await write(() => Data.groceryDelete(S.grocery.map((g) => g.id)));
+        break;
+    }
+  });
+
+  document.addEventListener("change", async (ev) => {
+    const el = ev.target;
+    if (el.id === "photoIn" && el.files && el.files[0]) {
+      try {
+        S.err = "";
+        const blob = await shrink(el.files[0]);
+        if (S.photoUrl) URL.revokeObjectURL(S.photoUrl);
+        S.photo = blob; S.photoUrl = URL.createObjectURL(blob);
+      } catch (e) { S.err = e.message || "Couldn't read that image."; }
+      render();
+    }
+    if (el.dataset.gtoggle) {
+      const id = el.dataset.gtoggle;
+      await write(() => Data.groceryUpdate(id, el.checked));
+    }
+  });
+
+  document.addEventListener("input", (ev) => {
+    const el = ev.target;
+    if (el.id === "q") { S.q = el.value; const m = $("#main"); m.innerHTML = S.view === "want" ? wantView() : feedView(); }
+    if (el.id === "pasteBox") { S.paste = el.value; S.err = ""; const c = $("#pasteCtl"); if (c) c.innerHTML = pasteControls(); }
+  });
+
+  // Paste a caption (with or without the link) and it gets organized right away.
+  document.addEventListener("paste", (ev) => {
+    if (ev.target.id !== "pasteBox" || !S.canAI || S.busy) return;
+    setTimeout(() => {
+      S.paste = ev.target.value;
+      const { rest } = splitPaste(S.paste);
+      if (rest.length >= 40) pasteExtract();
+      else { const c = $("#pasteCtl"); if (c) c.innerHTML = pasteControls(); }
+    }, 0);
+  });
+
+  document.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const f = ev.target;
+    if (f.id === "gate") {
+      const p = $("#g-pass"); const nm = $("#g-name").value.trim().slice(0, 40);
+      if (!nm) return;
+      S.gateErr = "";
+      if (p) { S.passcode = p.value.trim(); LS.set("passcode", S.passcode); }
+      S.me = nm; LS.set("name", nm); S.changeName = false;
+      render(); load();
+      return;
+    }
+    if (f.id === "gAdd") {
+      const v = $("#gText").value.trim(); if (!v) return;
+      if (await write(() => Data.groceryAdd([{ text: v, by: S.me }]))) { $("#gText").value = ""; $("#gText").focus(); }
+    }
+    if (f.id === "cAdd") {
+      const v = $("#cText").value.trim(); const r = getRecipe(S.openId); if (!v || !r) return;
+      await write(() => Data.comment(r.id, v));
+    }
+    if (f.id === "editForm") {
+      const data = readForm();
+      const btn = f.querySelector('button[type="submit"]'); btn.disabled = true;
+      if (f.dataset.ctx === "draft") {
+        const d = S.draft;
+        let imageId = null;
+        if (d._sourceType === "photo" && S.photo) imageId = await uploadPhoto(S.photo);
+        const id = await saveNew(data, { sourceType: d._sourceType, rawText: d._raw || "", imageId });
+        if (id) { resetAdd(); location.hash = "#feed"; setTimeout(() => openRecipe(id), 50); }
+        else btn.disabled = false;
+      } else {
+        const r = getRecipe(S.openId); if (!r) return;
+        const was = !!r.want;
+        const ok = await write(() => Data.update(r.id, { ...data, wantAt: data.want && !was ? now() : r.wantAt || null }), "Saved");
+        if (ok) { S.editing = false; renderSheet(); } else btn.disabled = false;
+      }
+    }
+  });
+
+  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && S.openId) closeRecipe(); });
+
+  function route() {
+    const h = location.hash.replace("#", "");
+    S.view = VIEWS.includes(h) ? h : "feed";
+    if (S.openId) closeRecipe(true);
+    S.err = S.view === "add" ? S.err : "";
+    S.deleteArm = false;
+    render();
+    window.scrollTo(0, 0);
+  }
+  window.addEventListener("hashchange", route);
+  route();
+  init();
+})();
+</script>
+</body>
+</html>
