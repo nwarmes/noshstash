@@ -360,10 +360,10 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
   }
 
   // ---------- organizing (runs on the backend) ----------
-  async function extract(material, images) {
+  async function extract(material, images, url) {
     let imageBase64 = "";
     if (images && images.length) imageBase64 = await toBase64(images[0]);
-    const v = await api("organize", { text: material || "", imageBase64, mime: "image/jpeg" });
+    const v = await api("organize", { text: material || "", url: url || "", imageBase64, mime: "image/jpeg" });
     if (!v || typeof v !== "object") throw { message: "No recipe came back." };
     const arr = (x) => (Array.isArray(x) ? x.map((s) => String(s).trim()).filter(Boolean) : []);
     return {
@@ -587,10 +587,11 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
     const { url, rest } = splitPaste(S.paste);
     const linkOnly = url && rest.length < 15;
     const ai = S.canAI;
-    return `${url ? `<div class="note">Link found: <b>${esc(sourceOf(url) || url)}</b>${linkOnly ? ". Instagram and TikTok don't let other sites read their posts, so paste the caption too to get the full recipe. A link by itself gets saved to sort later." : ""}</div>` : ""}
+    const social = /instagram|tiktok|facebook/i.test(url);
+    return `${url ? `<div class="note">Link found: <b>${esc(sourceOf(url) || url)}</b>${linkOnly && social ? ". Instagram and TikTok usually block apps from reading posts, so paste the caption in too for the full recipe." : ""}</div>` : ""}
       <div class="row">
-        ${ai && !linkOnly ? `<button class="btn primary" data-act="paste-extract" ${S.busy || !rest ? "disabled" : ""}>Organize recipe</button>` : ""}
-        ${url ? `<button class="btn ${linkOnly || !ai ? "primary" : ""}" data-act="paste-quick" ${S.busy ? "disabled" : ""}>Save link, add recipe later</button>` : ""}
+        ${ai ? `<button class="btn primary" data-act="paste-extract" ${S.busy || (!rest && !url) ? "disabled" : ""}>${linkOnly ? "Organize from link" : "Organize recipe"}</button>` : ""}
+        ${url ? `<button class="btn ${!ai ? "primary" : ""}" data-act="paste-quick" ${S.busy ? "disabled" : ""}>Save link, add recipe later</button>` : ""}
         ${!linkOnly ? `<button class="btn ghost" data-act="paste-manual" ${S.busy || !S.paste.trim() ? "disabled" : ""}>Fill in by hand</button>` : ""}
       </div>`;
   }
@@ -672,7 +673,7 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
         </div>` : ""}
         ${needsDetails(r) ? `<div class="block"><h3>Needs details</h3><p class="note" style="margin:0 0 10px">Saved without ingredients or steps. Paste the caption or recipe to fill it in.</p>
           ${S.canWrite ? `<textarea id="fillText" placeholder="Paste caption or recipe text…"></textarea>
-          <div class="row" style="margin-top:8px">${S.canAI ? `<button class="btn primary" data-act="fill-extract" ${S.busy ? "disabled" : ""}>Read and fill in</button>` : ""}<button class="btn" data-act="edit">Fill in by hand</button></div>
+          <div class="row" style="margin-top:8px">${S.canAI && r.sourceUrl ? `<button class="btn primary" data-act="fill-link" ${S.busy ? "disabled" : ""}>Read from link</button>` : ""}${S.canAI ? `<button class="btn ${r.sourceUrl ? "" : "primary"}" data-act="fill-extract" ${S.busy ? "disabled" : ""}>Read pasted text</button>` : ""}<button class="btn" data-act="edit">Fill in by hand</button></div>
           ${S.busy ? `<span class="working"><span class="spin"></span>Reading…</span>` : ""}${S.err ? `<div class="error">${esc(S.err)}</div>` : ""}` : ""}</div>` : ""}
         ${!needsDetails(r) ? `<p class="note" style="margin:-4px 0 0">Tap ingredients as you gather them and steps as you finish them.</p>` : ""}
         ${(r.ingredients || []).length ? `<div class="block"><h3>Ingredients <span class="count">${r.ingredients.filter((l) => !isHead(l)).length}</span></h3>
@@ -749,8 +750,8 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
 
   function pasteExtract() {
     const { url, rest } = splitPaste(S.paste);
-    if (!rest) { S.err = "Paste the caption or recipe text too."; render(); return; }
-    runExtract((url ? "Source link: " + url + "\n\n" : "") + rest, null, { sourceUrl: url, title: "", _sourceType: url ? "link" : "text", _raw: rest });
+    if (!rest && !url) { S.err = "Paste a link or some recipe text first."; render(); return; }
+    runExtract(rest, null, { sourceUrl: url, title: "", _sourceType: url ? "link" : "text", _raw: rest });
   }
 
   function patchFromExtract(r, x, raw, replace) {
@@ -765,7 +766,7 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
   async function runExtract(material, images, base) {
     S.busy = true; S.err = ""; render();
     try {
-      const x = await extract(material, images);
+      const x = await extract(material, images, base.sourceUrl);
       S.busy = false;
       if (!x.isRecipe && !x.ingredients.length) {
         S.draft = { ...base, title: base.title || "", _warn: "Couldn't find a recipe in that. Fill in what you can, or save it as is." };
@@ -815,13 +816,22 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
         if (S.deleteArm !== r.id) { S.deleteArm = r.id; renderSheet(); setTimeout(() => { if (S.deleteArm === r.id) { S.deleteArm = false; renderSheet(); } }, 4000); break; }
         { const id = r.id; closeRecipe(); await write(() => Data.del(id), "Recipe deleted"); }
         break;
+      case "fill-link": {
+        S.busy = true; S.err = ""; renderSheet();
+        try {
+          const x = await extract("", null, r.sourceUrl);
+          S.busy = false;
+          await write(() => Data.update(r.id, patchFromExtract(r, x, r.rawText || "", false)), "Filled in. Check it over.");
+        } catch (e) { S.busy = false; S.err = (e && e.message) || "Couldn't read that link."; renderSheet(); }
+        break;
+      }
       case "fill-extract": {
         const txt = $("#fillText").value.trim();
         if (!txt) { S.err = "Paste the caption or recipe first."; renderSheet(); break; }
         S.busy = true; S.err = ""; renderSheet();
         try {
           const sp = splitPaste(txt);
-          const x = await extract((r.sourceUrl ? "Source link: " + r.sourceUrl + "\n\n" : "") + sp.rest);
+          const x = await extract(sp.rest, null, r.sourceUrl || sp.url);
           S.busy = false;
           const patch = patchFromExtract(r, x, sp.rest, false);
           if (sp.url && !r.sourceUrl) patch.sourceUrl = sp.url;
@@ -841,7 +851,7 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
       case "reclean": {
         S.busy = true; renderSheet();
         try {
-          const x = await extract((r.sourceUrl ? "Source link: " + r.sourceUrl + "\n\n" : "") + r.rawText);
+          const x = await extract(r.rawText, null, r.sourceUrl);
           S.busy = false; S.checks.clear();
           await write(() => Data.update(r.id, patchFromExtract(r, x, r.rawText, true)), "Reorganized");
         } catch { S.busy = false; toast("Couldn't organize that. Try again in a minute."); renderSheet(); }
@@ -892,8 +902,8 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
     if (ev.target.id !== "pasteBox" || !S.canAI || S.busy) return;
     setTimeout(() => {
       S.paste = ev.target.value;
-      const { rest } = splitPaste(S.paste);
-      if (rest.length >= 40) pasteExtract();
+      const { url, rest } = splitPaste(S.paste);
+      if (rest.length >= 40 || (url && rest.length < 15)) pasteExtract();
       else { const c = $("#pasteCtl"); if (c) c.innerHTML = pasteControls(); }
     }, 0);
   });
