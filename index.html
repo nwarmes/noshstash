@@ -611,7 +611,7 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
     const linkOnly = url && rest.length < 15;
     const ai = S.canAI;
     const social = /instagram|tiktok|facebook/i.test(url);
-    const pending = S.pendingUrl ? `<div class="row" style="align-items:center"><img src="${esc(S.pendingUrl)}" alt="Attached cover photo" style="width:56px;height:56px;object-fit:cover;border-radius:8px"><span class="note">Cover photo attached</span><button class="btn ghost" data-act="drop-pending" style="padding:6px 12px">Remove</button></div>` : "";
+    const pending = S.pendingUrl ? `<div class="row" style="align-items:center"><img src="${esc(S.pendingUrl)}" referrerpolicy="no-referrer" alt="Attached cover photo" style="width:56px;height:56px;object-fit:cover;border-radius:8px"><span class="note">Cover photo attached</span><button class="btn ghost" data-act="drop-pending" style="padding:6px 12px">Remove</button></div>` : "";
     return `${pending}${url ? `<div class="note">Link found: <b>${esc(sourceOf(url) || url)}</b>${linkOnly && social ? ". Instagram and TikTok usually block apps from reading posts, so paste the caption in too for the full recipe." : ""}</div>` : ""}
       <div class="row">
         ${ai ? `<button class="btn primary" data-act="paste-extract" ${S.busy || (!rest && !url) ? "disabled" : ""}>${linkOnly ? "Organize from link" : "Organize recipe"}</button>` : ""}
@@ -690,6 +690,35 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
         if (S.photoUrl) URL.revokeObjectURL(S.photoUrl);
         S.addMode = "photo"; S.photo = blob; S.photoUrl = URL.createObjectURL(blob); S.err = ""; render();
       }
+      return;
+    }
+    toast("Open a recipe first, then paste the photo into it.");
+  }
+
+  // A pasted photo *address* (some sites copy the link instead of the picture) counts as a photo too.
+  function looksLikeImageUrl(t) {
+    t = (t || "").trim();
+    if (!/^https:\/\/\S+$/i.test(t)) return false;
+    return /\.(jpe?g|png|webp|avif)(\?|#|$)/i.test(t) || /\/thmb\/|wp-content\/uploads|cloudinary|imgix|\/images?\//i.test(t);
+  }
+
+  async function handleImageUrl(u) {
+    if (!S.canWrite) return;
+    u = u.trim();
+    if (S.openId && !S.editing) {
+      const r = getRecipe(S.openId); if (!r) return;
+      const had = photosOf(r).length;
+      const images = had ? [...(r.images || []), u] : [u, ...(r.images || [])];
+      S.badImg.delete(u);
+      await write(() => Data.update(r.id, { images }), had ? "Photo added. Tap Edit to make it the cover." : "Photo added as the cover.");
+      return;
+    }
+    if ((S.openId && S.editing) || S.draft) { S.formImages.push(u); const box = $("#formPhotos"); if (box) box.innerHTML = formPhotosHTML(); toast("Photo added."); return; }
+    if (S.view === "add") {
+      if (S.pendingUrl && S.pendingPhoto) URL.revokeObjectURL(S.pendingUrl);
+      S.pendingPhoto = null; S.pendingUrl = u;
+      const c = $("#pasteCtl"); if (c) c.innerHTML = pasteControls();
+      toast(S.paste.trim() ? "Photo attached. It'll be the cover." : "Photo attached. Now paste the recipe text or link.");
       return;
     }
     toast("Open a recipe first, then paste the photo into it.");
@@ -845,7 +874,7 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
     await write(() => Data.groceryAdd(items), `Added ${k} item${k > 1 ? "s" : ""} to groceries`);
   }
 
-  function resetAdd() { S.draft = null; S.photo = null; if (S.photoUrl) URL.revokeObjectURL(S.photoUrl); S.photoUrl = null; S.paste = ""; S.err = ""; S.formKey = null; if (S.pendingUrl) URL.revokeObjectURL(S.pendingUrl); S.pendingPhoto = null; S.pendingUrl = null; }
+  function resetAdd() { S.draft = null; S.photo = null; if (S.photoUrl) URL.revokeObjectURL(S.photoUrl); S.photoUrl = null; S.paste = ""; S.err = ""; S.formKey = null; if (S.pendingPhoto && S.pendingUrl) URL.revokeObjectURL(S.pendingUrl); S.pendingPhoto = null; S.pendingUrl = null; }
 
   function pasteExtract() {
     const { url, rest } = splitPaste(S.paste);
@@ -919,7 +948,7 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
         if (S.deleteArm !== r.id) { S.deleteArm = r.id; renderSheet(); setTimeout(() => { if (S.deleteArm === r.id) { S.deleteArm = false; renderSheet(); } }, 4000); break; }
         { const id = r.id; closeRecipe(); await write(() => Data.del(id), "Recipe deleted"); }
         break;
-      case "drop-pending": if (S.pendingUrl) URL.revokeObjectURL(S.pendingUrl); S.pendingPhoto = null; S.pendingUrl = null; { const c = $("#pasteCtl"); if (c) c.innerHTML = pasteControls(); } break;
+      case "drop-pending": if (S.pendingPhoto && S.pendingUrl) URL.revokeObjectURL(S.pendingUrl); S.pendingPhoto = null; S.pendingUrl = null; { const c = $("#pasteCtl"); if (c) c.innerHTML = pasteControls(); } break;
       case "get-photos": {
         S.busy = true; renderSheet();
         try {
@@ -1017,10 +1046,19 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
   document.addEventListener("paste", (ev) => {
     const items = [...((ev.clipboardData && ev.clipboardData.items) || [])];
     const img = items.find((i) => i.kind === "file" && /^image\//.test(i.type));
-    if (ev.target && ev.target.id === "pasteTarget") {
+    const txt = (ev.clipboardData && ev.clipboardData.getData("text/plain")) || "";
+    const tid = ev.target && ev.target.id;
+    if (tid === "pasteTarget") {
       ev.preventDefault();
-      if (img) handleImageFile(img.getAsFile()); else toast("There's no photo on the clipboard. Copy a photo first.");
+      if (img) handleImageFile(img.getAsFile());
+      else if (looksLikeImageUrl(txt)) handleImageUrl(txt);
+      else toast("There's no photo on the clipboard. Copy a photo first.");
       return;
+    }
+    if (!img && looksLikeImageUrl(txt)) {
+      // In a normal text field (title, notes…) a link is just text. Elsewhere, treat it as the photo.
+      const editable = ev.target && (ev.target.isContentEditable || /^(INPUT|TEXTAREA)$/.test(ev.target.tagName));
+      if (!editable || tid === "pasteBox") { ev.preventDefault(); handleImageUrl(txt); return; }
     }
     if (!img) return;
     // Pasting a whole recipe into the text box can carry an image along; keep the text in that case.
@@ -1076,6 +1114,7 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
         let imageId = null;
         if (d._sourceType === "photo" && S.photo) imageId = await uploadPhoto(S.photo);
         if (S.pendingPhoto) { const pid = await uploadPhoto(S.pendingPhoto); if (pid) data.images = [driveUrl(pid), ...(data.images || [])]; }
+        else if (S.pendingUrl && /^https:/.test(S.pendingUrl)) data.images = [S.pendingUrl, ...(data.images || [])];
         const id = await saveNew(data, { sourceType: d._sourceType, rawText: d._raw || "", imageId });
         if (id) { resetAdd(); location.hash = "#feed"; setTimeout(() => openRecipe(id), 50); }
         else btn.disabled = false;
