@@ -121,6 +121,11 @@ textarea { min-height: 110px; resize: vertical; }
 .gallery button { flex: none; width: 72px; height: 72px; padding: 0; border: 2px solid transparent; border-radius: 10px; overflow: hidden; background: var(--herb-soft); }
 .gallery button[aria-pressed="true"] { border-color: var(--accent); }
 .gallery img { width: 100%; height: 100%; object-fit: cover; display: block; }
+label.btn { font-size: 1rem; display: inline-flex; cursor: pointer; }
+.paste-target { min-width: 150px; min-height: 42px; padding: 10px 14px; border: 1.5px dashed var(--muted); border-radius: 999px; color: var(--muted); font-weight: 700; cursor: text; outline: none; caret-color: transparent; }
+.paste-target:empty::before { content: attr(data-label); }
+.paste-target:focus { border-color: var(--accent); }
+.paste-target:focus:empty::before { content: "Now paste (⌘V or long-press › Paste)"; font-weight: 400; }
 .form-photos { display: flex; gap: 8px; flex-wrap: wrap; }
 .form-photos .ph { position: relative; width: 76px; height: 76px; border-radius: 10px; overflow: hidden; background: var(--herb-soft); }
 .form-photos img { width: 100%; height: 100%; object-fit: cover; }
@@ -606,7 +611,8 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
     const linkOnly = url && rest.length < 15;
     const ai = S.canAI;
     const social = /instagram|tiktok|facebook/i.test(url);
-    return `${url ? `<div class="note">Link found: <b>${esc(sourceOf(url) || url)}</b>${linkOnly && social ? ". Instagram and TikTok usually block apps from reading posts, so paste the caption in too for the full recipe." : ""}</div>` : ""}
+    const pending = S.pendingUrl ? `<div class="row" style="align-items:center"><img src="${esc(S.pendingUrl)}" alt="Attached cover photo" style="width:56px;height:56px;object-fit:cover;border-radius:8px"><span class="note">Cover photo attached</span><button class="btn ghost" data-act="drop-pending" style="padding:6px 12px">Remove</button></div>` : "";
+    return `${pending}${url ? `<div class="note">Link found: <b>${esc(sourceOf(url) || url)}</b>${linkOnly && social ? ". Instagram and TikTok usually block apps from reading posts, so paste the caption in too for the full recipe." : ""}</div>` : ""}
       <div class="row">
         ${ai ? `<button class="btn primary" data-act="paste-extract" ${S.busy || (!rest && !url) ? "disabled" : ""}>${linkOnly ? "Organize from link" : "Organize recipe"}</button>` : ""}
         ${url ? `<button class="btn ${!ai ? "primary" : ""}" data-act="paste-quick" ${S.busy ? "disabled" : ""}>Save link, add recipe later</button>` : ""}
@@ -641,6 +647,58 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
     </form>`;
   }
 
+  const driveUrl = (id) => "https://drive.google.com/thumbnail?id=" + encodeURIComponent(id) + "&sz=w1200";
+
+  async function addPhotoToRecipe(file) {
+    const r = getRecipe(S.openId); if (!r || S.uploading) return;
+    S.uploading = true; renderSheet();
+    try {
+      const id = await uploadPhoto(await shrink(file));
+      S.uploading = false;
+      if (!id) { renderSheet(); return; }
+      const fresh = getRecipe(r.id) || r;
+      const had = photosOf(fresh).length;
+      const images = had ? [...(fresh.images || []), driveUrl(id)] : [driveUrl(id), ...(fresh.images || [])];
+      await write(() => Data.update(r.id, { images }), had ? "Photo added. Tap Edit to make it the cover." : "Photo added as the cover.");
+    } catch (e) { S.uploading = false; toast((e && e.message) || "Couldn't add that photo."); renderSheet(); }
+  }
+
+  async function addPhotoToForm(file) {
+    if (S.uploading) return;
+    S.uploading = true; toast("Adding photo…");
+    try {
+      const id = await uploadPhoto(await shrink(file));
+      if (id) { S.formImages.push(driveUrl(id)); const box = $("#formPhotos"); if (box) box.innerHTML = formPhotosHTML(); toast("Photo added."); }
+    } catch (e) { toast((e && e.message) || "Couldn't add that photo."); }
+    S.uploading = false;
+  }
+
+  // One place for every way a photo arrives: pasted, dropped, or picked.
+  async function handleImageFile(file) {
+    if (!file || !S.canWrite) return;
+    if (S.openId && !S.editing) return addPhotoToRecipe(file);
+    if ((S.openId && S.editing) || S.draft) return addPhotoToForm(file);
+    if (S.view === "add") {
+      let blob;
+      try { blob = await shrink(file); } catch (e) { toast(e.message || "Couldn't read that image."); return; }
+      if (S.addMode === "paste" && S.paste.trim()) {
+        if (S.pendingUrl) URL.revokeObjectURL(S.pendingUrl);
+        S.pendingPhoto = blob; S.pendingUrl = URL.createObjectURL(blob);
+        const c = $("#pasteCtl"); if (c) c.innerHTML = pasteControls();
+        toast("Photo attached. It'll be the cover.");
+      } else {
+        if (S.photoUrl) URL.revokeObjectURL(S.photoUrl);
+        S.addMode = "photo"; S.photo = blob; S.photoUrl = URL.createObjectURL(blob); S.err = ""; render();
+      }
+      return;
+    }
+    toast("Open a recipe first, then paste the photo into it.");
+  }
+
+  function pasteTargetHTML(label) {
+    return `<div class="paste-target" id="pasteTarget" contenteditable="true" role="textbox" aria-label="${esc(label)}" data-label="${esc(label)}"></div>`;
+  }
+
   // Turn the API's technical "site blocks our reader" error into plain words.
   function friendly(msg) {
     if (/not accessible to our user agent|url_not_accessible|robots/i.test(msg || "")) return "This site blocks apps from reading its recipes. Copy the recipe text and paste it in with the link, or take a screenshot of the recipe and use Screenshot or photo.";
@@ -648,9 +706,10 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
   }
 
   function formPhotosHTML() {
-    if (!S.formImages.length) return "";
+    const add = `<div class="row"><label class="btn" for="formPhotoIn" style="font-weight:700">Add a photo</label><input id="formPhotoIn" type="file" accept="image/*" hidden>${pasteTargetHTML("Paste a photo")}</div>`;
+    if (!S.formImages.length) return add;
     return `<div class="grid-gap" style="gap:6px"><b style="font-size:.9rem">Photos from the page</b><span class="note">The first photo is the cover. Tap a photo to make it the cover, or × to remove it.</span>
-      <div class="form-photos">${S.formImages.map((u, i) => `<div class="ph"${i === 0 ? ' style="outline:3px solid var(--accent);outline-offset:-3px"' : ""}><span data-cover="${i}" style="display:block;width:100%;height:100%;cursor:pointer">${imgTag(u, "")}</span><button type="button" data-rmimg="${i}" aria-label="Remove photo ${i + 1}">×</button></div>`).join("")}</div></div>`;
+      <div class="form-photos">${S.formImages.map((u, i) => `<div class="ph"${i === 0 ? ' style="outline:3px solid var(--accent);outline-offset:-3px"' : ""}><span data-cover="${i}" style="display:block;width:100%;height:100%;cursor:pointer">${imgTag(u, "")}</span><button type="button" data-rmimg="${i}" aria-label="Remove photo ${i + 1}">×</button></div>`).join("")}</div>${add}</div>`;
   }
 
   function readForm() {
@@ -709,6 +768,7 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
           ${(r.ingredients || []).length ? `<button class="btn" data-act="to-grocery">Add to groceries</button>` : ""}
           <label class="btn" for="addPhotoIn" style="font-weight:700">${S.uploading ? "Uploading photo…" : "Add a photo"}</label>
           <input id="addPhotoIn" type="file" accept="image/*" hidden ${S.uploading ? "disabled" : ""}>
+          ${pasteTargetHTML("Paste a photo")}
         </div>` : ""}
         ${needsDetails(r) ? `<div class="block"><h3>Needs details</h3><p class="note" style="margin:0 0 10px">Saved without ingredients or steps. Paste the caption or recipe to fill it in.</p>
           ${S.canWrite ? `<textarea id="fillText" placeholder="Paste caption or recipe text…"></textarea>
@@ -785,7 +845,7 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
     await write(() => Data.groceryAdd(items), `Added ${k} item${k > 1 ? "s" : ""} to groceries`);
   }
 
-  function resetAdd() { S.draft = null; S.photo = null; if (S.photoUrl) URL.revokeObjectURL(S.photoUrl); S.photoUrl = null; S.paste = ""; S.err = ""; S.formKey = null; }
+  function resetAdd() { S.draft = null; S.photo = null; if (S.photoUrl) URL.revokeObjectURL(S.photoUrl); S.photoUrl = null; S.paste = ""; S.err = ""; S.formKey = null; if (S.pendingUrl) URL.revokeObjectURL(S.pendingUrl); S.pendingPhoto = null; S.pendingUrl = null; }
 
   function pasteExtract() {
     const { url, rest } = splitPaste(S.paste);
@@ -859,6 +919,7 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
         if (S.deleteArm !== r.id) { S.deleteArm = r.id; renderSheet(); setTimeout(() => { if (S.deleteArm === r.id) { S.deleteArm = false; renderSheet(); } }, 4000); break; }
         { const id = r.id; closeRecipe(); await write(() => Data.del(id), "Recipe deleted"); }
         break;
+      case "drop-pending": if (S.pendingUrl) URL.revokeObjectURL(S.pendingUrl); S.pendingPhoto = null; S.pendingUrl = null; { const c = $("#pasteCtl"); if (c) c.innerHTML = pasteControls(); } break;
       case "get-photos": {
         S.busy = true; renderSheet();
         try {
@@ -929,22 +990,8 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
 
   document.addEventListener("change", async (ev) => {
     const el = ev.target;
-    if (el.id === "addPhotoIn" && el.files && el.files[0]) {
-      const r = getRecipe(S.openId); if (!r) return;
-      S.uploading = true; renderSheet();
-      try {
-        const blob = await shrink(el.files[0]);
-        const id = await uploadPhoto(blob);
-        if (id) {
-          const url = "https://drive.google.com/thumbnail?id=" + encodeURIComponent(id) + "&sz=w1200";
-          const had = photosOf(r).length;
-          const images = had ? [...(r.images || []), url] : [url, ...(r.images || [])];
-          S.uploading = false;
-          await write(() => Data.update(r.id, { images }), had ? "Photo added. Tap Edit to make it the cover." : "Photo added as the cover.");
-        } else { S.uploading = false; renderSheet(); }
-      } catch (e) { S.uploading = false; toast((e && e.message) || "Couldn't add that photo."); renderSheet(); }
-      return;
-    }
+    if (el.id === "formPhotoIn" && el.files && el.files[0]) { const f = el.files[0]; el.value = ""; await addPhotoToForm(f); return; }
+    if (el.id === "addPhotoIn" && el.files && el.files[0]) { const f = el.files[0]; el.value = ""; await handleImageFile(f); return; }
     if (el.id === "photoIn" && el.files && el.files[0]) {
       try {
         S.err = "";
@@ -966,9 +1013,33 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
     if (el.id === "pasteBox") { S.paste = el.value; S.err = ""; const c = $("#pasteCtl"); if (c) c.innerHTML = pasteControls(); }
   });
 
+  // Paste a photo straight from a website (Copy Image, then paste) or drop one onto the page.
+  document.addEventListener("paste", (ev) => {
+    const items = [...((ev.clipboardData && ev.clipboardData.items) || [])];
+    const img = items.find((i) => i.kind === "file" && /^image\//.test(i.type));
+    if (ev.target && ev.target.id === "pasteTarget") {
+      ev.preventDefault();
+      if (img) handleImageFile(img.getAsFile()); else toast("There's no photo on the clipboard. Copy a photo first.");
+      return;
+    }
+    if (!img) return;
+    // Pasting a whole recipe into the text box can carry an image along; keep the text in that case.
+    if (ev.target && ev.target.id === "pasteBox" && items.some((i) => i.type === "text/plain")) return;
+    ev.preventDefault();
+    handleImageFile(img.getAsFile());
+  }, true);
+  document.addEventListener("input", (ev) => { if (ev.target && ev.target.id === "pasteTarget") ev.target.textContent = ""; });
+  document.addEventListener("dragover", (ev) => { if ([...ev.dataTransfer.types].includes("Files")) ev.preventDefault(); });
+  document.addEventListener("drop", (ev) => {
+    const f = [...(ev.dataTransfer.files || [])].find((x) => /^image\//.test(x.type));
+    if (!f) return;
+    ev.preventDefault();
+    handleImageFile(f);
+  });
+
   // Paste a caption (with or without the link) and it gets organized right away.
   document.addEventListener("paste", (ev) => {
-    if (ev.target.id !== "pasteBox" || !S.canAI || S.busy) return;
+    if (ev.defaultPrevented || ev.target.id !== "pasteBox" || !S.canAI || S.busy) return;
     setTimeout(() => {
       S.paste = ev.target.value;
       const { url, rest } = splitPaste(S.paste);
@@ -1004,6 +1075,7 @@ details.raw summary { cursor: pointer; font-weight: 700; color: var(--muted); }
         const d = S.draft;
         let imageId = null;
         if (d._sourceType === "photo" && S.photo) imageId = await uploadPhoto(S.photo);
+        if (S.pendingPhoto) { const pid = await uploadPhoto(S.pendingPhoto); if (pid) data.images = [driveUrl(pid), ...(data.images || [])]; }
         const id = await saveNew(data, { sourceType: d._sourceType, rawText: d._raw || "", imageId });
         if (id) { resetAdd(); location.hash = "#feed"; setTimeout(() => openRecipe(id), 50); }
         else btn.disabled = false;
